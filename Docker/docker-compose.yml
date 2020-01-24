@@ -47,7 +47,7 @@ services:
     restart: unless-stopped
 
   timesketch:
-    image: aorlikoski/skadi_timesketch:20190326
+    image: albchen/timesketch_mans:latest
     container_name: timesketch
     depends_on:
       - redis
