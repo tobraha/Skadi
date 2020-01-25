@@ -47,7 +47,7 @@ services:
     restart: unless-stopped
 
   timesketch:
-    image: albchen/timesketch_mans:latest
+    image: albchen/timesketch_mans:dev
     container_name: timesketch
     depends_on:
       - redis
