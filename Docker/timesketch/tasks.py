@@ -104,6 +104,8 @@ def _get_index_task_class(file_extension):
     """
     if file_extension == 'plaso':
         index_class = run_plaso
+    elif file_extension == 'mans':
+        index_class = run_mans
     elif file_extension in ['csv', 'jsonl']:
         index_class = run_csv_jsonl
     else:
@@ -132,7 +134,7 @@ def _get_index_analyzers():
 
 
 def build_index_pipeline(file_path, timeline_name, index_name, file_extension,
-                         sketch_id=None):
+                         sketch_id=None, only_index=False):
     """Build a pipeline for index and analysis.
 
     Args:
@@ -141,6 +143,10 @@ def build_index_pipeline(file_path, timeline_name, index_name, file_extension,
         index_name: Name of the index to index to.
         file_extension: The file extension of the file.
         sketch_id: The ID of the sketch to analyze.
+        only_index: If set to true then only indexing tasks are run, not
+            analyzers. This is to be used when uploading data in chunks,
+            we don't want to run the analyzers until all chunks have been
+            uploaded.
 
     Returns:
         Celery chain with indexing task (or single indexing task) and analyzer
@@ -151,12 +157,15 @@ def build_index_pipeline(file_path, timeline_name, index_name, file_extension,
     sketch_analyzer_chain = None
     searchindex = SearchIndex.query.filter_by(index_name=index_name).first()
 
-    if sketch_id:
-        sketch_analyzer_chain = build_sketch_analysis_pipeline(
-            sketch_id, searchindex.id, user_id=None)
-
     index_task = index_task_class.s(
         file_path, timeline_name, index_name, file_extension)
+
+    if only_index:
+        return index_task
+
+    if sketch_id:
+        sketch_analyzer_chain, _ = build_sketch_analysis_pipeline(
+            sketch_id, searchindex.id, user_id=None)
 
     # If there are no analyzers just run the indexer.
     if not index_analyzer_chain and not sketch_analyzer_chain:
@@ -198,7 +207,8 @@ def build_sketch_analysis_pipeline(sketch_id, searchindex_id, user_id,
         analyzer_kwargs (dict): Arguments to the analyzers.
 
     Returns:
-        Celery group with analysis tasks or None if no analyzers are enabled.
+        A tuple with a Celery group with analysis tasks or None if no analyzers
+        are enabled and an analyzer session ID.
     """
     tasks = []
 
@@ -210,7 +220,7 @@ def build_sketch_analysis_pipeline(sketch_id, searchindex_id, user_id,
 
     # Exit early if no sketch analyzers are configured to run.
     if not analyzer_names:
-        return None
+        return None, None
 
     if not analyzer_kwargs:
         analyzer_kwargs = current_app.config.get('ANALYZERS_DEFAULT_KWARGS', {})
@@ -257,9 +267,9 @@ def build_sketch_analysis_pipeline(sketch_id, searchindex_id, user_id,
         tasks.append(run_email_result_task.s(sketch_id))
 
     if not tasks:
-        return None
+        return None, None
 
-    return chain(tasks)
+    return chain(tasks), analysis_session.id
 
 
 @celery.task(track_started=True)
@@ -481,6 +491,53 @@ def run_csv_jsonl(source_file_path, timeline_name, index_name, source_type):
         return None
 
     # Set status to ready when done
+    _set_timeline_status(index_name, status='ready')
+
+    return index_name
+
+
+@celery.task(track_started=True, base=SqlAlchemyTask)
+def run_mans(source_file_path, timeline_name, index_name, source_type):
+    """Create a Celery task for processing mans file.
+    Args:
+        source_file_path: Path to mans file.
+        timeline_name: Name of the Timesketch timeline.
+        index_name: Name of the datastore index.
+        source_type: Type of file, csv or jsonl.
+    Returns:
+        Name (str) of the index.
+    """
+    # Log information to Celery
+    message = 'Index timeline [{0:s}] to index [{1:s}] (source: {2:s})'
+    logging.info(message.format(timeline_name, index_name, source_type))
+
+    try:
+        mans_to_es_path = current_app.config['MANS_TO_ES_PATH']
+    except KeyError:
+        mans_to_es_path = 'mans_to_es.py'
+
+    elastic_path = current_app.config['ELASTIC_HOST']
+    elastic_port = current_app.config['ELASTIC_PORT']
+
+    cmd = [
+        mans_to_es_path, '--filename', source_file_path,
+        '--name', timeline_name, '--index', index_name,
+        '--es_host', str(elastic_path), '--es_port', str(elastic_port)
+    ]
+
+    # Run mans_to_es.py
+    try:
+        if six.PY3:
+            subprocess.check_output(
+                cmd, stderr=subprocess.STDOUT, encoding='utf-8')
+        else:
+            subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+    except subprocess.CalledProcessError as e:
+        # Mark the searchindex and timelines as failed and exit the task
+        _set_timeline_status(index_name, status='fail', error_msg=e.output)
+        return e.output
+
+    # Mark the searchindex and timelines as ready
     _set_timeline_status(index_name, status='ready')
 
     return index_name
