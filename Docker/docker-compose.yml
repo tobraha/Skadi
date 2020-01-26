@@ -61,6 +61,9 @@ services:
       - backend
     volumes:
       - ./timesketch/timesketch_default.conf:/etc/timesketch.conf
+      - ./timesketch/forms.py:/usr/local/lib/python3.6/dist-packages/timesketch/lib/forms.py
+      - ./timesketch/tasks.py:/usr/local/lib/python3.6/dist-packages/timesketch/lib/tasks.py
+      - ./timesketch/timelines.html:/usr/local/lib/python3.6/dist-packages/timesketch/templates/sketch/timelines.html
       - tssockets:/var/timesketch/
     restart: unless-stopped
 
