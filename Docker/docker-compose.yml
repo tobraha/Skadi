@@ -111,7 +111,7 @@ services:
     restart: unless-stopped
 
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:6.6.2
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.10.2
     container_name: elasticsearch
     networks:
       - backend
@@ -130,7 +130,7 @@ services:
     restart: unless-stopped
 
   kibana:
-    image: docker.elastic.co/kibana/kibana:6.6.2
+    image: docker.elastic.co/kibana/kibana:7.10.2
     container_name: kibana
     networks:
       - backend
