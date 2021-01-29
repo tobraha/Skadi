@@ -118,7 +118,9 @@ services:
     ports:
       - 9200:9200
     environment:
+      - node.name=skadi
       - cluster.name=skadi
+      - cluster.initial_master_nodes=skadi
       - bootstrap.memory_lock=true
       - "ES_JAVA_OPTS=-Xms${HEAP_SIZE} -Xmx${HEAP_SIZE}"
     ulimits:
